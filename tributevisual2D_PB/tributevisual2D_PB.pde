@@ -1,3 +1,4 @@
+import processing.net.*;
 import processing.serial.*;
 
 import de.looksgood.ani.*;
@@ -20,7 +21,7 @@ AniSequence coreseq;
 AniSequence ntseq;
 float corepulsein = 0.5;
 float corepulseout = 0.6;
-float br,bg,bb;
+float br, bg, bb;
 int maxtweets = 5;
 int tweetcount = 0;
 
@@ -28,24 +29,26 @@ ArrayList queue;
 
 PrintWriter log;
 
-Serial myPort; 
+Serial myPort;
+Server myServer;
 
 
 // This is where you enter your Oauth info
-static String OAuthConsumerKey = "";
-static String OAuthConsumerSecret = "";
+static String OAuthConsumerKey = "****";
+static String OAuthConsumerSecret = "****";
 // This is where you enter your Access Token info
-static String AccessToken = "";
-static String AccessTokenSecret = "";
-String keywords[] = { "#AaronSwartz","#aaronswartz","aaron swartz","#pdftribute", "#openaccess","#opAngel","#OpenTeaching" }; // what to look for.
+static String AccessToken = "****";
+static String AccessTokenSecret = "****";
+String keywords[] = { 
+  "#AaronSwartz", "#aaronswartz", "aaron swartz", "#pdftribute", "#openaccess", "#opAngel", "#OpenTeaching","#openTeaching","#openteaching","#Openteaching"
+}; // what to look for.
 
 ///////////////////////////// End Variable Config ////////////////////////////
 
 TwitterStream twitter = new TwitterStreamFactory().getInstance();
 
 void setup() {
-myPort = new Serial(this, Serial.list()[0], 9600);
-
+  myPort = new Serial(this, "COM12", 9600);
   size(1024, 768);
   smooth();
   frameRate(30);
@@ -60,7 +63,7 @@ myPort = new Serial(this, Serial.list()[0], 9600);
   corersf = corepulsein;
   screenBuf = new int[width*height];
   font = new RFont("C64_User_Mono_v1.0-STYLE.ttf");
-  RG.textFont(font,20);
+  RG.textFont(font, 20);
   cpos = new PVector(width/2, height+20);
   font.setSize(10);
   font.forceAscii = true;
@@ -85,7 +88,7 @@ myPort = new Serial(this, Serial.list()[0], 9600);
   ntseq.add(Ani.to(this, 2, "corersf", 1, Ani.CIRC_IN));
   ntseq.add(Ani.to(this, 2, "br", 255, Ani.CIRC_IN));
   ntseq.add(Ani.to(this, 2, "bg", 255, Ani.CIRC_IN));
-  ntseq.add(Ani.to(this, 2, "bb", 255, Ani.CIRC_IN,"onEnd:flashEnd"));
+  ntseq.add(Ani.to(this, 2, "bb", 255, Ani.CIRC_IN, "onEnd:flashEnd"));
   ntseq.endStep();
   ntseq.beginStep();
   ntseq.add(Ani.to(this, 2, "corersf", corepulsein, Ani.CIRC_OUT, "onEnd:ntSequenceEnd"));
@@ -94,24 +97,25 @@ myPort = new Serial(this, Serial.list()[0], 9600);
   ntseq.add(Ani.to(this, 2, "bb", 35, Ani.EXPO_IN));
   ntseq.endStep();
   ntseq.endSequence();
-  
+
   connectTwitter();
   twitter.addListener(listener);
   if (keywords.length==0) twitter.sample();
   else twitter.filter(new FilterQuery().track(keywords));
   queue = new ArrayList();
   log = createWriter("log.csv"); 
-  loadPixels();
   println(Serial.list());
- 
+  // Starts a myServer on port 5204
+  myServer = new Server(this, 5204);
+  loadPixels();
 }
 
 void draw() {
-  
-  
+
+
   background(br, bg, bb);
   pushMatrix();
-  translate(315,20);
+  translate(315, 20);
   RG.text("Latest #AaronSwartz mentions on Twitter:");
   popMatrix();
   PImage tc = createImage(core.width, core.height, ARGB);
@@ -126,7 +130,7 @@ void draw() {
     if (!ct.done) {
       ct.display();
     }
-    else{
+    else {
       tweets.remove(i);
       //println("Removed:"+i);
     }
@@ -134,7 +138,7 @@ void draw() {
   if (frameCount % 300 == 0) {
     checkQueue();
   }
-  text(frameRate,width-50,20);
+  //text(frameRate, width-50, 20);
 }
 
 void stop() {
@@ -142,25 +146,29 @@ void stop() {
   log.close();
 } 
 
-void addTweet(String text) {
-ctweet.sendToBack();
-  ctweet = new Tweet(text, cpos, this);
+void addTweet(Status status) {
+  ctweet.sendToBack();
+  ctweet = new Tweet(status.getText(), cpos, this);
   tweets.add(ctweet);
   coreseq.pause();
   ntseq.start();
-String m1[] = match(text,"#OpenTeaching");
-if (m1 != null) {   myPort.write("a"); println ("yes cabron");
+  String m1[] = match((String)status.getText().toLowerCase(), "#openteaching");
+  if (m1 != null) {   
+    myPort.write("a");
+    myServer.write(status.getUser().getScreenName());
+    println ("yes cabron");
+  }
 }
 
+void addQueue(Status s) {
+  queue.add(s);
 }
 
-void addQueue(String text){
-  queue.add(text);
-}
 
-void checkQueue(){
-  if(queue.size()>0){
-    addTweet((String)queue.get(0));
+void checkQueue() {
+  if (queue.size()>0) {
+    Status ts = (Status)queue.get(0);
+    addTweet(ts);
     queue.remove(0);
   }
 }
@@ -172,14 +180,14 @@ void ntSequenceEnd() {
   coreseq.start();
 }
 
-void flashEnd(){
-  if(tweets.size()>maxtweets){
+void flashEnd() {
+  if (tweets.size()>maxtweets) {
     //println("Maxtweets");
     Tweet ft = (Tweet)tweets.get(0);
     ft.seq.pause();
     ft.r = ft.g = ft.b = 255;
     ft.done = true;
-  }  
+  }
 }
 
 // Initial connection
@@ -196,14 +204,19 @@ private static AccessToken loadAccessToken() {
 
 // This listens for new tweet
 StatusListener listener = new StatusListener() {
-  
+
   public void onStatus(Status status) {
     //println(" @" + status.getUser().getScreenName() + " - " + status.getText());
     tweetcount++;
+    
     String out = String.valueOf(day())+"-"+String.valueOf(month())+"-"+String.valueOf(year())+" "+String.valueOf(hour())+":"+String.valueOf(minute())+":"+String.valueOf(second())+";"+status.getUser().getScreenName()+";"+status.getText();
     println(out);
     logMsg(out);
-    addQueue(status.getText());
+     String m1[] = match((String)status.getText().toLowerCase(), "#openteaching");
+    if (m1 != null) {   
+    addTweet(status);
+  }else{addQueue(status);}
+    
   }
 
   public void onDeletionNotice(StatusDeletionNotice statusDeletionNotice) {
@@ -221,12 +234,23 @@ StatusListener listener = new StatusListener() {
   public void onException(Exception ex) {
     ex.printStackTrace();
   }
-
 };
-void logMsg(String msg){
+void logMsg(String msg) {
   log.println(msg);
   log.flush();
 }
+void keyReleased() {
+  if (key == 'a') {
+    myPort.write("a");    
+  }
+    if (key == 'b') {
+    myServer.write("@pepe");
+  }
+  if (key == 'c') {
+    myPort.write("a");   
+       myServer.write("@pepe"); 
+  }
+} 
 // 0a0
 // aba
 // 0a0
